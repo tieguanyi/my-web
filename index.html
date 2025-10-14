@@ -1,15 +1,723 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh">
 <head>
-  <meta charset="UTF-8" />
-  <title>我的第一个网页</title>
-  <style>
-    body { background: #f2f2f2; font-family: sans-serif; }
-    h1   { color: #4b0082; }   /* 紫色标题 */
-  </style>
+<meta charset="UTF-8">
+<title>多页面网页编辑器</title>
+<style>
+/* ====== 你原来的完整样式 ====== */
+*,::before,::after{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;}
+.flex{display:flex;}
+.flex-1{flex:1 1 0%;}
+.w-48{width:12rem;}
+.w-64{width:16rem;}
+.w-full{width:100%;}
+.h-screen{height:100vh;}
+.h-8{height:2rem;}
+.p-2{padding:0.5rem;}
+.p-3{padding:0.75rem;}
+.p-4{padding:1rem;}
+.m-4{margin:1rem;}
+.mb-2{margin-bottom:0.5rem;}
+.mb-3{margin-bottom:0.75rem;}
+.space-y-2 > :not([hidden]) ~ :not([hidden]){margin-top:0.5rem;}
+.text-white{color:#fff;}
+.bg-white{background-color:#fff;}
+.bg-gray-100{background-color:#f3f4f6;}
+.bg-blue-500{background-color:#3b82f6;}
+.bg-green-500{background-color:#10b981;}
+.bg-yellow-500{background-color:#eab308;}
+.bg-purple-500{background-color:#a855f7;}
+.bg-red-500{background-color:#ef4444;}
+.bg-indigo-500{background-color:#6366f1;}
+.bg-orange-600{background-color:#ea580c;}
+.bg-teal-600{background-color:#0d9488;}
+.rounded{border-radius:0.25rem;}
+.border{border-width:1px;}
+.shadow{box-shadow:0 1px 3px 0 rgba(0,0,0,.1),0 1px 2px 0 rgba(0,0,0,.06);}
+.block{display:block;}
+.relative{position:relative;}
+.overflow-hidden{overflow:hidden;}
+#canvas{min-height:100vh;background:#fafafa;border:2px dashed #ccc;position:relative;}
+.canvas-item{position:absolute;border:1px dashed transparent;cursor:move;}
+.canvas-item.selected{border-color:#3b82f6;}
+input[type=range]{width:100%;}
+.btn-sm{padding:4px 8px;font-size:12px;}
+.btn-md{padding:8px 16px;font-size:14px;}
+.btn-lg{padding:12px 24px;font-size:18px;}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+
+<body class="bg-gray-100 flex h-screen">
+  <!-- ===== 左侧一列：页面区 + 组件区（纵向） ===== -->
+  <aside class="w-48 bg-white p-4 shadow space-y-4">
+    <!-- 1. 页面管理（新增） -->
+    <section class="space-y-2">
+      <h2 class="font-bold mb-2">页面：</h2>
+      <select id="pageList" class="w-full border rounded mb-2"></select>
+      <button class="w-full mb-2 px-3 py-2 bg-blue-500 text-white rounded text-sm" onclick="newPage()">新建</button>
+      <button class="w-full mb-2 px-3 py-2 bg-red-500 text-white rounded text-sm" onclick="deletePage()">删除</button>
+      <button class="w-full px-3 py-2 bg-purple-500 text-white rounded text-sm" onclick="exportMultiPage()">导出多页</button>
+    </section>
+
+    <!-- 2. 组件区（你原来那一堆按钮，一行不改） -->
+    <section class="space-y-2">
+      <h2 class="font-bold mb-2">组件</h2>
+      <button onclick="addText()"  class="w-full px-3 py-2 bg-blue-500 text-white rounded">添加文字</button>
+      <button onclick="addImage()" class="w-full px-3 py-2 bg-green-500 text-white rounded">添加图片</button>
+      <button onclick="addButton()" class="w-full px-3 py-2 bg-indigo-500 text-white rounded">添加按钮</button>
+      <button onclick="addGif()"   class="w-full px-3 py-2 bg-orange-600 text-white rounded">添加动图(GIF)</button>
+      <button onclick="addVideo()"  class="w-full px-3 py-2 bg-teal-600 text-white rounded">添加视频</button>
+      <button onclick="syncSize()" class="w-full px-3 py-2 bg-yellow-500 text-white rounded">同步当前尺寸</button>
+      <button onclick="exportHTML()"class="w-full px-3 py-2 bg-purple-500 text-white rounded">导出网页</button>
+    </section>
+  </aside>
+
+  <!-- ===== 主体区域：完全恢复原来布局 ===== -->
+  <div class="flex-1 flex">
+    <!-- 画布 -->
+    <main id="canvas" class="flex-1 m-4 relative overflow-hidden"></main>
+    <!-- 右侧属性 -->
+    <aside id="propPanel" class="w-64 bg-white p-4 shadow"></aside>
+  </div>
+
+  <script>
+    /* ================= 多页面数据 ================= */
+    let pages = { index: [], about: [], contact: [] };
+    let currentPage = 'index';
+    let selected = null;
+    const canvas = document.getElementById('canvas');
+
+    /* ================= 初始化 ================= */
+    function init() {
+      renderPageList();
+      changePage(currentPage);
+    }
+    init();
+
+    /* ================= 页面管理 ================= */
+    function renderPageList() {
+      const list = document.getElementById('pageList');
+      list.innerHTML = '';
+      Object.keys(pages).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p; opt.textContent = p;
+        if (p === currentPage) opt.selected = true;
+        list.appendChild(opt);
+      });
+    }
+
+    function saveCurrentPage() {
+      pages[currentPage] = getCanvasJSON();
+    }
+
+    function changePage(name) {
+      // 保存当前页面状态
+      saveCurrentPage();
+      
+      // 切换到新页面
+      currentPage = name;
+      canvas.innerHTML = '';
+      renderFromJSON(pages[name]);
+      selected = null; 
+      renderPropPanel();
+      
+      // 更新页面列表选中状态
+      document.getElementById('pageList').value = name;
+    }
+
+    document.getElementById('pageList').onchange = (e) => changePage(e.target.value);
+
+    function newPage() {
+      const name = prompt('新页面名称（英文）:', 'page' + (Object.keys(pages).length + 1));
+      if (!name || pages[name]) return;
+      pages[name] = [];
+      renderPageList();
+      changePage(name);
+    }
+
+    function deletePage() {
+      if (Object.keys(pages).length <= 1) return alert('至少保留一个页面');
+      if (!confirm(`确定删除页面 "${currentPage}" ？`)) return;
+      delete pages[currentPage];
+      const first = Object.keys(pages)[0];
+      changePage(first);
+      renderPageList();
+    }
+
+    /* ================= 元素序列化/反序列化 ================= */
+    function getCanvasJSON() {
+      return Array.from(canvas.children).map(el => {
+        const item = {
+          type: el.tagName,
+          style: el.style.cssText,
+          dataset: { ...el.dataset },
+          className: el.className
+        };
+        
+        if (el.tagName === 'DIV') {
+          item.innerHTML = el.innerHTML;
+          item.contentEditable = el.contentEditable;
+        } else if (el.tagName === 'IMG') {
+          item.src = el.src;
+        } else if (el.tagName === 'A') {
+          item.innerHTML = el.innerHTML;
+          item.href = el.href;
+        } else if (el.tagName === 'VIDEO') {
+          item.src = el.src;
+          item.controls = el.controls;
+          item.autoplay = el.autoplay;
+          item.loop = el.loop;
+          item.muted = el.muted;
+        } else if (el.tagName === 'IFRAME') {
+          item.src = el.src;
+          item.frameBorder = el.frameBorder;
+          item.allow = el.allow;
+        }
+        return item;
+      });
+    }
+
+    function renderFromJSON(arr) {
+      arr.forEach(item => {
+        let el = null;
+        if (item.type === 'DIV') {
+          el = document.createElement('div');
+          el.innerHTML = item.innerHTML;
+          if (item.contentEditable) el.contentEditable = true;
+        } else if (item.type === 'IMG') {
+          el = document.createElement('img');
+          el.src = item.src;
+        } else if (item.type === 'A') {
+          el = document.createElement('a');
+          el.innerHTML = item.innerHTML;
+          el.href = item.href || '#';
+        } else if (item.type === 'VIDEO') {
+          el = document.createElement('video');
+          el.src = item.src;
+          el.controls = item.controls;
+          el.autoplay = item.autoplay;
+          el.loop = item.loop;
+          el.muted = item.muted;
+        } else if (item.type === 'IFRAME') {
+          el = document.createElement('iframe');
+          el.src = item.src;
+          el.frameBorder = item.frameBorder;
+          el.allow = item.allow;
+        }
+        
+        if (!el) return;
+        
+        el.className = item.className;
+        el.style.cssText = item.style;
+        Object.assign(el.dataset, item.dataset || {});
+        
+        bindSelect(el);
+        makeDraggable(el);
+        canvas.appendChild(el);
+      });
+    }
+
+    /* ================= 组件添加功能 ================= */
+    function addText() {
+      const div = document.createElement('div');
+      div.className = 'canvas-item'; 
+      div.contentEditable = true; 
+      div.innerText = '双击编辑文字';
+      div.style.left = '100px'; 
+      div.style.top = '100px'; 
+      div.style.fontSize = '16px'; 
+      div.style.color = '#000000';
+      
+      bindSelect(div); 
+      makeDraggable(div); 
+      canvas.appendChild(div); 
+      selectElement(div);
+      
+      // 保存到当前页面
+      saveCurrentPage();
+    }
+
+    function addImage() {
+      const input = document.createElement('input'); 
+      input.type = 'file'; 
+      input.accept = 'image/*';
+      input.onchange = e => {
+        const file = e.target.files[0]; 
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const img = new Image(); 
+          img.src = ev.target.result;
+          img.onload = () => {
+            const ratio = img.height / img.width;
+            const el = document.createElement('img'); 
+            el.src = img.src; 
+            el.className = 'canvas-item';
+            el.style.left = '100px'; 
+            el.style.top = '100px'; 
+            el.style.width = '200px';
+            el.style.height = Math.round(200 * ratio) + 'px';
+            el.dataset.lockRatio = '1'; 
+            el.dataset.ratio = ratio;
+            
+            bindSelect(el); 
+            makeDraggable(el); 
+            canvas.appendChild(el); 
+            selectElement(el);
+            
+            // 保存到当前页面
+            saveCurrentPage();
+          };
+        }; 
+        reader.readAsDataURL(file);
+      }; 
+      input.click();
+    }
+
+    function addButton() {
+      const btn = document.createElement('a'); 
+      btn.className = 'canvas-item btn-md'; 
+      btn.href = '#'; 
+      btn.innerText = '按钮';
+      btn.style.left = '100px'; 
+      btn.style.top = '100px'; 
+      btn.style.backgroundColor = '#10b981'; 
+      btn.style.color = '#ffffff';
+      btn.style.borderRadius = '4px'; 
+      btn.style.textDecoration = 'none'; 
+      btn.style.display = 'inline-block';
+      
+      bindSelect(btn); 
+      makeDraggable(btn); 
+      canvas.appendChild(btn); 
+      selectElement(btn);
+      
+      // 保存到当前页面
+      saveCurrentPage();
+    }
+
+    function addGif() {
+      const input = document.createElement('input'); 
+      input.type = 'file'; 
+      input.accept = 'image/gif';
+      input.onchange = e => {
+        const file = e.target.files[0]; 
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const img = new Image(); 
+          img.src = ev.target.result;
+          img.onload = () => {
+            const ratio = img.height / img.width;
+            const el = document.createElement('img'); 
+            el.src = img.src; 
+            el.className = 'canvas-item';
+            el.style.left = '100px'; 
+            el.style.top = '100px'; 
+            el.style.width = '200px';
+            el.style.height = Math.round(200 * ratio) + 'px';
+            el.dataset.lockRatio = '1'; 
+            el.dataset.ratio = ratio;
+            
+            bindSelect(el); 
+            makeDraggable(el); 
+            canvas.appendChild(el); 
+            selectElement(el);
+            
+            // 保存到当前页面
+            saveCurrentPage();
+          };
+        }; 
+        reader.readAsDataURL(file);
+      }; 
+      input.click();
+    }
+
+    function addVideo() {
+      const panel = document.getElementById('propPanel');
+      panel.innerHTML = `
+        <h2 class="font-bold mb-2">添加视频</h2>
+        <label class="block mb-2">本地视频文件</label>
+        <input type="file" id="localVideo" accept="video/mp4,video/webm,video/ogg" class="w-full mb-3">
+        <label class="block mb-2">或 YouTube 链接</label>
+        <input type="url" id="ytUrl" placeholder="https://www.youtube.com/watch?v=xxx" class="w-full border px-2 py-1 mb-3">
+        <div class="flex space-x-2 mb-3">
+          <label><input type="checkbox" id="vAuto" checked> 自动播放</label>
+          <label><input type="checkbox" id="vLoop" checked> 循环</label>
+          <label><input type="checkbox" id="vMute" checked> 静音</label>
+        </div>
+        <div class="flex space-x-2">
+          <button class="flex-1 px-3 py-2 bg-green-500 text-white rounded" onclick="insertVideo()">插入</button>
+          <button class="flex-1 px-3 py-2 bg-gray-400 text-white rounded" onclick="cancelVideoPanel()">取消</button>
+        </div>
+      `;
+    }
+
+    function cancelVideoPanel() {
+      document.getElementById('propPanel').innerHTML = '';
+      selected = null;
+      renderPropPanel();
+    }
+
+    function insertVideo() {
+      const localFile = document.getElementById('localVideo').files[0];
+      const ytUrl = document.getElementById('ytUrl').value.trim();
+      const auto = document.getElementById('vAuto').checked;
+      const loop = document.getElementById('vLoop').checked;
+      const mute = document.getElementById('vMute').checked;
+      
+      let el = null;
+      if (localFile) {
+        const url = URL.createObjectURL(localFile);
+        el = document.createElement('video'); 
+        el.src = url; 
+        el.className = 'canvas-item';
+        el.controls = true; 
+        el.autoplay = auto; 
+        el.loop = loop; 
+        el.muted = mute;
+      } else if (ytUrl) {
+        const id = ytUrl.split('v=')[1]?.split('&')[0]; 
+        if (!id) { alert('无效 YouTube 链接'); return; }
+        el = document.createElement('iframe'); 
+        el.className = 'canvas-item';
+        el.src = `https://www.youtube.com/embed/${id}?autoplay=${auto?1:0}&loop=${loop?1:0}&mute=${mute?1:0}&playlist=${loop?id:''}`;
+        el.frameBorder = '0'; 
+        el.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+      } else { 
+        alert('请选择文件或填写链接'); 
+        return; 
+      }
+      
+      el.style.left = '100px'; 
+      el.style.top = '100px'; 
+      el.style.width = '400px'; 
+      el.style.height = '225px';
+      el.dataset.lockRatio = '1'; 
+      el.dataset.ratio = 225 / 400; // 16:9
+      
+      cancelVideoPanel(); 
+      bindSelect(el); 
+      makeDraggable(el); 
+      canvas.appendChild(el); 
+      selectElement(el);
+      
+      // 保存到当前页面
+      saveCurrentPage();
+    }
+
+    /* ================= 交互功能 ================= */
+    function makeDraggable(el) {
+      interact(el).draggable({
+        listeners: {
+          move(event) {
+            const x = (parseFloat(event.target.style.left) || 0) + event.dx;
+            const y = (parseFloat(event.target.style.top)  || 0) + event.dy;
+            event.target.style.left = x + 'px'; 
+            event.target.style.top = y + 'px';
+            
+            // 拖动时实时保存
+            saveCurrentPage();
+          }
+        }
+      });
+    }
+
+    function bindSelect(el) { 
+      el.addEventListener('click', () => selectElement(el)); 
+    }
+
+    function selectElement(el) {
+      document.querySelectorAll('.canvas-item').forEach(i => i.classList.remove('selected'));
+      el.classList.add('selected'); 
+      selected = el; 
+      renderPropPanel();
+    }
+
+    /* ================= 属性面板 ================= */
+    function renderPropPanel() {
+      const panel = document.getElementById('propPanel');
+      if (!selected) { 
+        panel.innerHTML = ''; 
+        return; 
+      }
+      
+      const tag = selected.tagName;
+      if (tag === 'DIV') {
+        panel.innerHTML = `
+          <h2 class="font-bold mb-2">文字属性</h2>
+          <textarea id="txtCont" class="w-full border px-2 py-1 mb-3" rows="3">${selected.innerText}</textarea>
+          <label class="block mb-1">字体大小 (px)</label>
+          <input type="number" id="txtSize" class="w-full border px-2 py-1 mb-3" value="${parseInt(selected.style.fontSize)||16}">
+          <label class="block mb-1">文字颜色</label>
+          <input type="color" id="txtColor" class="w-full h-8 mb-3" value="${rgbToHex(selected.style.color||'#000000')}">
+          <div class="flex space-x-2 mb-3">
+            <label><input type="checkbox" id="txtBold"> 加粗</label>
+            <label><input type="checkbox" id="txtItalic"> 斜体</label>
+            <label><input type="checkbox" id="txtUnder"> 下划</label>
+          </div>
+          <button class="w-full px-3 py-2 bg-blue-500 text-white rounded mb-3" onclick="applyTextProps()">应用</button>
+          <button class="w-full px-3 py-2 bg-red-500 text-white rounded" onclick="deleteSelected()">删除该元素</button>
+        `;
+        
+        // 设置复选框状态
+        const boldCheck = panel.querySelector('#txtBold');
+        const italicCheck = panel.querySelector('#txtItalic');
+        const underCheck = panel.querySelector('#txtUnder');
+        
+        boldCheck.checked = selected.style.fontWeight === 'bold';
+        italicCheck.checked = selected.style.fontStyle === 'italic';
+        underCheck.checked = selected.style.textDecoration === 'underline';
+        
+      } else if (tag === 'IMG') {
+        const w = parseInt(selected.style.width)||200, h=parseInt(selected.style.height)||150;
+        panel.innerHTML = `
+          <h2 class="font-bold mb-2">图片属性</h2>
+          <label class="block mb-1">宽度 (px)</label>
+          <input type="range" id="imgWidth" class="w-full mb-2" min="50" max="800" value="${w}">
+          <div class="flex justify-between text-sm mb-3"><span>50</span><span id="imgWval">${w}</span><span>800</span></div>
+          <label class="block mb-1">高度 (px)</label>
+          <input type="range" id="imgHeight" class="w-full mb-2" min="50" max="600" value="${h}">
+          <div class="flex justify-between text-sm mb-3"><span>50</span><span id="imgHval">${h}</span><span>600</span></div>
+          <label class="flex items-center mb-3"><input type="checkbox" id="imgLock" ${selected.dataset.lockRatio==='1'?'checked':''}> 锁定比例</label>
+          <button class="w-full px-3 py-2 bg-green-500 text-white rounded mb-3" onclick="applyImgProps()">应用</button>
+          <button class="w-full px-3 py-2 bg-red-500 text-white rounded" onclick="deleteSelected()">删除该元素</button>
+        `;
+        
+        const wRng = panel.querySelector('#imgWidth');
+        const hRng = panel.querySelector('#imgHeight');
+        const lockCk = panel.querySelector('#imgLock');
+        
+        wRng.oninput = () => { 
+          panel.querySelector('#imgWval').textContent = wRng.value; 
+          liveResize(); 
+        };
+        hRng.oninput = () => { 
+          panel.querySelector('#imgHval').textContent = hRng.value; 
+          liveResize(); 
+        };
+        lockCk.onchange = liveResize;
+        
+        function liveResize() {
+          const lock = lockCk.checked;
+          const ratio = parseFloat(selected.dataset.ratio);
+          let w = parseInt(wRng.value);
+          let h = parseInt(hRng.value);
+          
+          if (lock && ratio) {
+            if (document.activeElement === wRng) { 
+              h = Math.round(w * ratio); 
+              hRng.value = h; 
+              panel.querySelector('#imgHval').textContent = h; 
+            }
+            if (document.activeElement === hRng) { 
+              w = Math.round(h / ratio); 
+              wRng.value = w; 
+              panel.querySelector('#imgWval').textContent = w; 
+            }
+          }
+          selected.style.width = w + 'px'; 
+          selected.style.height = h + 'px';
+          
+          // 实时保存
+          saveCurrentPage();
+        }
+        
+      } else if (tag === 'A') {
+        panel.innerHTML = `
+          <h2 class="font-bold mb-2">按钮属性</h2>
+          <label class="block mb-1">按钮文字</label>
+          <input id="btnText" class="w-full border px-2 py-1 mb-3" value="${selected.innerText}">
+          <label class="block mb-1">链接地址</label>
+          <input id="btnLink" class="w-full border px-2 py-1 mb-3" value="${selected.href==='#'?'':selected.href}">
+          <label class="block mb-1">背景颜色</label>
+          <input type="color" id="btnBg" class="w-full h-8 mb-3" value="${rgbToHex(selected.style.backgroundColor||'#10b981')}">
+          <label class="block mb-1">文字颜色</label>
+          <input type="color" id="btnColor" class="w-full h-8 mb-3" value="${rgbToHex(selected.style.color||'#ffffff')}">
+          <label class="block mb-1">圆角 (px)</label>
+          <input type="number" id="btnRadius" class="w-full border px-2 py-1 mb-3" value="${parseInt(selected.style.borderRadius)||4}">
+          <label class="block mb-1">按钮尺寸</label>
+          <select id="btnSize" class="w-full border px-2 py-1 mb-3">
+            <option value="btn-sm" ${selected.classList.contains('btn-sm')?'selected':''}>小</option>
+            <option value="btn-md" ${selected.classList.contains('btn-md')?'selected':''}>中</option>
+            <option value="btn-lg" ${selected.classList.contains('btn-lg')?'selected':''}>大</option>
+          </select>
+          <button class="w-full px-3 py-2 bg-indigo-500 text-white rounded mb-3" onclick="applyButtonProps()">应用</button>
+          <button class="w-full px-3 py-2 bg-red-500 text-white rounded" onclick="deleteSelected()">删除该元素</button>
+        `;
+      }
+    }
+
+    /* ================= 属性应用 ================= */
+    function applyTextProps() {
+      if (!selected || selected.tagName !== 'DIV') return;
+      selected.innerText = document.getElementById('txtCont').value;
+      selected.style.fontSize = document.getElementById('txtSize').value + 'px';
+      selected.style.color = document.getElementById('txtColor').value;
+      selected.style.fontWeight = document.getElementById('txtBold').checked ? 'bold' : 'normal';
+      selected.style.fontStyle = document.getElementById('txtItalic').checked ? 'italic' : 'normal';
+      selected.style.textDecoration = document.getElementById('txtUnder').checked ? 'underline' : 'none';
+      
+      saveCurrentPage();
+    }
+
+    function applyImgProps() {
+      if (!selected || selected.tagName !== 'IMG') return;
+      const lock = document.getElementById('imgLock').checked;
+      const w = parseInt(document.getElementById('imgWidth').value);
+      const h = parseInt(document.getElementById('imgHeight').value);
+      
+      selected.style.width = w + 'px';
+      if (lock) {
+        const ratio = parseFloat(selected.dataset.ratio);
+        const newH = Math.round(w * ratio);
+        selected.style.height = newH + 'px';
+        document.getElementById('imgHeight').value = newH;
+        document.getElementById('imgHval').textContent = newH;
+      } else {
+        selected.style.height = h + 'px';
+      }
+      
+      saveCurrentPage();
+    }
+
+    function applyButtonProps() {
+      if (!selected || selected.tagName !== 'A') return;
+      selected.innerText = document.getElementById('btnText').value;
+      selected.href = document.getElementById('btnLink').value || '#';
+      selected.style.backgroundColor = document.getElementById('btnBg').value;
+      selected.style.color = document.getElementById('btnColor').value;
+      selected.style.borderRadius = document.getElementById('btnRadius').value + 'px';
+      selected.classList.remove('btn-sm','btn-md','btn-lg');
+      selected.classList.add(document.getElementById('btnSize').value);
+      
+      saveCurrentPage();
+    }
+
+    function deleteSelected() {
+      if (!selected) return;
+      selected.remove(); 
+      selected = null; 
+      renderPropPanel();
+      saveCurrentPage();
+    }
+
+    /* ================= 导出功能 ================= */
+    function syncSize() {
+      document.querySelectorAll('#canvas img, #canvas video, #canvas iframe').forEach(el => {
+        const w = el.offsetWidth;
+        const h = el.offsetHeight;
+        el.style.width = w + 'px'; 
+        el.style.height = h + 'px';
+      });
+      saveCurrentPage();
+      alert('已锁定当前尺寸，导出不再变形！');
+    }
+
+    function exportHTML() {
+      syncSize();
+      const clone = canvas.cloneNode(true);
+      clone.querySelectorAll('.canvas-item').forEach(el => el.classList.remove('selected'));
+      const html = `<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>我的网页</title>
+<style>
+body{margin:0;font-family:sans-serif;position:relative;min-height:100vh;}
+.canvas-item{position:absolute;}
+.btn-sm{padding:4px 8px;font-size:12px;}
+.btn-md{padding:8px 16px;font-size:14px;}
+.btn-lg{padding:12px 24px;font-size:18px;}
+</style>
 </head>
 <body>
-  <h1>许老师，我好像又学到了新技能，想请你看看</h1>
-  <p>顺便试试VC code好不好做web设计</p>
+${clone.innerHTML}
+</body>
+</html>`;
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      saveAs(blob, '我的网页.html');
+    }
+
+    function exportMultiPage() {
+      // 确保保存当前页面
+      saveCurrentPage();
+      
+      const zip = new JSZip();
+      Object.entries(pages).forEach(([name, items]) => {
+        const container = document.createElement('div');
+        items.forEach(item => {
+          let el = null;
+          if (item.type === 'DIV') {
+            el = document.createElement('div');
+            el.innerHTML = item.innerHTML;
+            if (item.contentEditable) el.contentEditable = true;
+          } else if (item.type === 'IMG') {
+            el = document.createElement('img');
+            el.src = item.src;
+          } else if (item.type === 'A') {
+            el = document.createElement('a');
+            el.innerHTML = item.innerHTML;
+            el.href = item.href || '#';
+          } else if (item.type === 'VIDEO') {
+            el = document.createElement('video');
+            el.src = item.src;
+            el.controls = item.controls;
+            el.autoplay = item.autoplay;
+            el.loop = item.loop;
+            el.muted = item.muted;
+          } else if (item.type === 'IFRAME') {
+            el = document.createElement('iframe');
+            el.src = item.src;
+            el.frameBorder = item.frameBorder;
+            el.allow = item.allow;
+          }
+          
+          if (el) {
+            el.className = item.className;
+            el.style.cssText = item.style;
+            Object.assign(el.dataset, item.dataset || {});
+            container.appendChild(el);
+          }
+        });
+        
+        const html = `<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>${name}</title>
+<style>
+body{margin:0;font-family:sans-serif;position:relative;min-height:100vh;}
+.canvas-item{position:absolute;}
+.btn-sm{padding:4px 8px;font-size:12px;}
+.btn-md{padding:8px 16px;font-size:14px;}
+.btn-lg{padding:12px 24px;font-size:18px;}
+</style>
+</head>
+<body>
+${container.innerHTML}
+</body>
+</html>`;
+        
+        zip.file(name + '.html', html);
+      });
+      
+      zip.generateAsync({ type: 'blob' }).then(blob => {
+        saveAs(blob, 'multi-pages.zip');
+      });
+    }
+
+    /* ================= 工具函数 ================= */
+    function rgbToHex(rgb) {
+      if (!rgb || rgb.indexOf('rgb') !== 0) return '#000000';
+      const vals = rgb.match(/\d+/g);
+      if (!vals || vals.length < 3) return '#000000';
+      return '#' + vals.slice(0, 3).map(x => parseInt(x).toString(16).padStart(2, '0')).join('');
+    }
+  </script>
 </body>
 </html>
